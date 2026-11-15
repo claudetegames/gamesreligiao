@@ -4,7 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Corredor das Skins 3D</title>
-<style>
+#rankingBox {
+  width: 100%;
+  max-width: 340px;
+  max-height: 230px;
+  overflow-y: auto;
+  background: rgba(0,0,0,.45);
+  border: 1px solid #ffc93c;
+  border-radius: 14px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+#rankingBox h3 {
+  color: #ffc93c;
+  margin: 0 0 10px;
+}
+
+#rankingList {
+  padding-left: 25px;
+  text-align: left;
+  margin: 0;
+}
+
+#rankingList li {
+  padding: 7px;
+  border-bottom: 1px solid #444;
+  font-size: 14px;
+}
+ <style>
 :root{--bg:#10131c;--fg:#f4f4f8;--card:#1d2233;--acc:#ffc93c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden;touch-action:none}
 #wrap{position:relative;height:100%}
@@ -46,6 +74,12 @@ button.go{box-shadow:0 4px 0 #b8860b,0 8px 20px rgba(0,0,0,.4)}
 <div id="bank" style="font-size:20px"></div>
 <div class="skins" id="modes"><button class="sk on" data-m="n"><i>🏃</i>Normal</button><button class="sk" data-m="nc"><i>⏱️</i>Sem moeda</button><button class="sk" data-m="boss"><i>👹</i>Chefe</button></div>
 <small id="mdesc"></small>
+ <div id="rankingBox" style="display:none">
+  <h3>🏆 RANKING NO COINS</h3>
+  <ol id="rankingList">
+    <li>Carregando ranking...</li>
+  </ol>
+ </div>
 <div class="skins" id="skins"></div>
 <button class="go" id="play">Correr</button>
 <button class="sk" id="mus" style="width:auto;padding:6px 14px">🔊 Música</button>
@@ -60,9 +94,14 @@ button.go{box-shadow:0 4px 0 #b8860b,0 8px 20px rgba(0,0,0,.4)}
 <div class="ov hide" id="pause"><h1>Pausado</h1><button class="go" id="resume">Continuar</button><button class="sk" id="pmenu" style="width:auto;padding:8px 18px">Voltar ao menu</button></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+ <script>
 const $=i=>document.getElementById(i),LW=2.4,TL=22;
-const R=new THREE.WebGLRenderer({canvas:$('c'),antialias:true}),S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(62,1,.1,220);
+const sbClient = window.supabase.createClient(
+  'https://ncwbgeplgzatwljipzrb.supabase.co',
+  'sb_publishable_zasunkPGFj7x_itN_G61Ng_5hZqiHu3'
+);
+ const R=new THREE.WebGLRenderer({canvas:$('c'),antialias:true}),S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(62,1,.1,220);
 function rs(){R.setPixelRatio(Math.min(devicePixelRatio||1,2));R.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}
 addEventListener('resize',rs);rs();
 const CT=(w,h,f)=>{const c=document.createElement('canvas');c.width=w;c.height=h;f(c.getContext('2d'),w,h);return new THREE.CanvasTexture(c)};
@@ -120,9 +159,59 @@ function rend(){$('bank').textContent='🪙 '+bank;const sd=$('skins');sd.innerH
  for(const k in SK){const b=document.createElement('button'),ow=own.includes(k);b.className='sk'+(k===skin?' on':'');
   b.innerHTML='<i>'+SK[k][1]+'</i>'+SK[k][0]+(ow?'':'<br><small>🔒 '+PR[k]+'</small>');
   b.onclick=()=>{if(!ow){if(bank<PR[k])return;bank-=PR[k];own.push(k);sv()}skin=k;setSkin();rend()};sd.appendChild(b)}}
-const D={n:'Só a pontuação no canto. Corra o máximo que conseguir.',nc:'O cronômetro corre sem parar até você pegar uma moeda. Pegou, ele para até reiniciar a partida.',boss:'Luta contra o chefe: ele joga obstáculos de longe. Pegue moedas para ferir o chefe e derrote-o antes de ser pego!'};
+const D={n:'Só a pontuação no canto. Corra o máximo que conseguir.',nc:'O cronômetro corre sem parar até você pegar uma moeda. Pegou, ele para até reiniciar a partida.',boss:'Luta contra o chefe: ele joga obstáculos de longe. Pegue moedas para ferir o chefe e derrote-o antes de ser pego!'};async function atualizarRanking() {
+ sbClient
+  .channel('ranking-no-coins')
+  .on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: 'no_coins_scores'
+    },
+    () => atualizarRanking()
+  )
+  .subscribe();
+
+atualizarRanking();
+ const lista = $('rankingList');
+
+  const { data, error } = await sbClient
+    .from('no_coins_scores')
+    .select('player_name, score')
+    .order('score', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    lista.innerHTML = '<li>Erro ao carregar ranking</li>';
+    console.error(error);
+    return;
+  }
+
+  lista.innerHTML = '';
+
+  if (!data || data.length === 0) {
+    lista.innerHTML = '<li>Ninguém pontuou ainda!</li>';
+    return;
+  }
+
+  data.forEach((jogador) => {
+    const item = document.createElement('li');
+    item.textContent = jogador.player_name + ' - ' +
+      (jogador.score / 10).toFixed(1) + 's';
+    lista.appendChild(item);
+  });
+}
 $('mdesc').textContent=D.n;
-document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b));$('mdesc').textContent=D[mode]});
+document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>{
+  mode=b.dataset.m;
+  document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b));
+  $('mdesc').textContent=D[mode];
+
+  $('rankingBox').style.display = mode==='nc' ? 'block' : 'none';
+
+  if(mode==='nc') atualizarRanking();
+});
 
 /* objetos */
 const cg=new THREE.CylinderGeometry(.38,.38,.1,20);cg.rotateX(Math.PI/2);
@@ -152,9 +241,27 @@ $('mus').onclick=e=>{mon=!mon;e.target.textContent=mon?'🔊 Música':'🔇 Mudo
 function reset(){obs.forEach(o=>S.remove(o.m));obs=[];px=0;tl=1;jy=0;vy=0;fl=0;sl=0;spd=20;t=0;dist=0;sc=0;coins=0;tm=0;stop=false;sh=0;mg=0;dbl=0;nx=0;hp=2;inv=0;ct=0;shk=0;cz=14;ch.visible=false;bossHp=100;bt=1;bx=0;dj=0;setSkin()}
 function rc(v){let b=0;try{b=+localStorage.getItem('bt')||0;if(v>b){b=v;localStorage.setItem('bt',v)}}catch(e){}return Math.max(b,v)}
 function win(){run=false;bank+=coins+25;sv();rend();$('hud').classList.add('hide');$('over').querySelector('h1').textContent='Vitória!';$('res').innerHTML='<b>Chefe derrotado!</b><br>Pontos: <b>'+Math.floor(sc)+'</b> · Bônus: <b>25 moedas</b>';$('over').classList.remove('hide')}
-function die(){run=false;bank+=coins;sv();rend();$('over').querySelector('h1').textContent='Fim de jogo';$('hud').classList.add('hide');
- $('res').innerHTML='Pontos: <b>'+Math.floor(sc)+'</b> · Moedas: <b>'+coins+'</b>'+(mode==='nc'?'<br>Tempo: <b>'+tm.toFixed(1)+'s</b> · Recorde: <b>'+rc(tm).toFixed(1)+'s</b>'+(stop?' (parou ao pegar moeda)':' (sem pegar nenhuma moeda!)'):(mode==='boss'?'<br>Vida do chefe: <b>'+Math.max(0,bossHp)+'%</b>':''));
- $('over').classList.remove('hide')}
+function die(){$('over').classList.remove('hide');
+if(mode==='nc') enviarPontuacaoNoCoins();}async function enviarPontuacaoNoCoins() {
+  if (mode !== 'nc') return;
+
+  let nome = localStorage.getItem('nc_name');
+
+  if (!nome) {
+    nome = prompt('Digite seu nome para o ranking:') || 'Anônimo';
+    nome = nome.trim().slice(0, 20) || 'Anônimo';
+    localStorage.setItem('nc_name', nome);
+  }
+
+  const { error } = await sbClient
+    .from('no_coins_scores')
+    .insert({
+      player_name: nome,
+      score: Math.round(tm * 10)
+    });
+
+  if (error) console.error(error);
+}
 function pop(tx,c){const e=document.createElement('div');e.className='pp';e.textContent=tx;e.style.color=c;const v=new THREE.Vector3(px,jy+2.6,0).project(cam);e.style.left=((v.x+1)/2*innerWidth+(Math.random()*30-15))+'px';e.style.top=((1-v.y)/2*innerHeight)+'px';$('wrap').appendChild(e);setTimeout(()=>e.remove(),900)}
 function hit(o){if(o)o.hit=1;if(inv>0)return;
  if(sh){sh=0;inv=.8;if(o&&o.k!=='train'){o.dead=1;S.remove(o.m)}snd(200,.2);pop('🛡️ Bloqueado!','#7df');return}
